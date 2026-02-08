@@ -1,6 +1,6 @@
 // pricing.js (load before the rest of the app)
 window.PG_TIER = "free"; // web default
-window.PG_DONATE_URL = "https://perpetualgenesis.app"; // replace with PayPal.me / Ko-fi / Stripe link later
+window.PG_DONATE_URL = "https://www.paypal.com/ncp/payment/D4Rj$Y8NGLAQ"; // replace with PayPal.me / Ko-fi / Stripe link later
 
 
 window.PG_RULES = {
@@ -43,4 +43,5 @@ window.pgLimit = function (key) {
   const v = window.pgGetRule(key);
   return typeof v === "number" ? v : (v === Infinity ? Infinity : 0);
 };
+
 
