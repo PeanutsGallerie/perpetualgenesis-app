@@ -1,0 +1,6 @@
+# Canonicalize to the branded app domain (avoid netlify.app origin)
+https://perpetualgenesis-app.netlify.app/*  https://app.perpetualgenesis.app/:splat  301!
+http://perpetualgenesis-app.netlify.app/*   https://app.perpetualgenesis.app/:splat  301!
+
+# SPA fallback (safe even if you mostly use tabs; helps deep-links)
+ /*  /index.html  200
