@@ -1766,6 +1766,7 @@ input {
 
 
 
+
 #inventoryTable {
     display: table !important;
     width: 100%;
@@ -1862,9 +1863,7 @@ button[onclick*="deleteInventoryItem"] {
 
 button[onclick*="deleteInventoryItem"]:hover {
     background: #fa0000;
-}
-
-
+}        
 
 
 /* ===============================
@@ -2607,6 +2606,20 @@ button[onclick*="deleteInventoryItem"]:hover {
 }
 
 
-
-
-
+/* ===============================
+   MOBILE KEYBOARD EDIT FIX (Layout toolbars)
+   Keeps inputs editable without iOS zoom + provides breathing room
+   =============================== */
+@media (max-width: 768px) {
+  #bedOffsetControls input,
+  #bedOffsetControls select,
+  #bedOffsetControls textarea,
+  #obstacleControls input,
+  #obstacleControls select,
+  #obstacleControls textarea,
+  .obstacle-row input,
+  .obstacle-row select,
+  .obstacle-row textarea {
+    font-size: 16px;
+  }
+}
