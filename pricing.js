@@ -1,5 +1,5 @@
 // pricing.js (load before the rest of the app)
-window.PG_TIER = "pro"; // store build // web default
+window.PG_TIER = "free"; // store build // web default
 
 window.PG_RULES = {
   free: {
@@ -45,3 +45,4 @@ window.pgLimit = function (key) {
   const v = window.pgGetRule(key);
   return typeof v === "number" ? v : (v === Infinity ? Infinity : 0);
 };
+
