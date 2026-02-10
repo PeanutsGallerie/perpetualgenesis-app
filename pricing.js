@@ -1,7 +1,5 @@
 // pricing.js (load before the rest of the app)
-window.PG_TIER = "free"; // web default
-window.PG_DONATE_URL = "https://www.paypal.com/ncp/payment/D4RJ4Y8YNGLAQ"; // replace with PayPal.me / Ko-fi / Stripe link later
-
+window.PG_TIER = "pro"; // store build // web default
 
 window.PG_RULES = {
   free: {
@@ -10,6 +8,8 @@ window.PG_RULES = {
     maxCropsPerBed: 3,
     obstacles: true,
     spaceYield: true,
+    spacingCompare: false,
+    spacingSuccession: false,
     sharePlan: false,
     inventory: false,
     exportPrint: false,
@@ -21,6 +21,8 @@ window.PG_RULES = {
     maxCropsPerBed: Infinity,
     obstacles: true,
     spaceYield: true,
+    spacingCompare: true,
+    spacingSuccession: true,
     sharePlan: true,
     inventory: true,
     exportPrint: true,
@@ -43,6 +45,3 @@ window.pgLimit = function (key) {
   const v = window.pgGetRule(key);
   return typeof v === "number" ? v : (v === Infinity ? Infinity : 0);
 };
-
-
-
