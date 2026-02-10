@@ -1,9 +1,19 @@
+
 // Read-only layout builder. Does not modify existing plans or functions.
 // Exposes window.Layout with render() and print().
 
 function byId(id) {
   return document.getElementById(id);
 }
+
+// ───────────────────────────────────────────────────────────────
+// Bed placement policy
+// If true, beds may be dragged/resized/rotated so they can extend beyond
+// the property bounds. This removes the "length-based" placement limit.
+// ───────────────────────────────────────────────────────────────
+const PG_ALLOW_BEDS_OUT_OF_BOUNDS = false;
+
+
 
 function getPgViewportEl() {
   return (
@@ -1053,12 +1063,14 @@ function ensurePropertyStateInPlace(bedCount, srcProp) {
     if (!(typeof b.type === "string" && b.type)) b.type = "raised";
     // Path
     if (!(typeof b.pathFt === "number" && isFinite(b.pathFt))) b.pathFt = 2;
-    // Dimensions (null allowed)
-    if (!(b.wFt === null || (typeof b.wFt === "number" && isFinite(b.wFt) && b.wFt > 0))) {
-      b.wFt = null;
+    // Dimensions (persist per-bed defaults so they don't revert to stock after reload)
+    const _defWFt = parseFloat(byId("layoutBedW")?.value || byId("bedWidth")?.value || "") || null;
+    const _defLFt = parseFloat(byId("layoutBedL")?.value || byId("bedLength")?.value || "") || null;
+    if (!(typeof b.wFt === "number" && isFinite(b.wFt) && b.wFt > 0)) {
+      b.wFt = (typeof _defWFt === "number" && isFinite(_defWFt) && _defWFt > 0) ? _defWFt : null;
     }
-    if (!(b.lFt === null || (typeof b.lFt === "number" && isFinite(b.lFt) && b.lFt > 0))) {
-      b.lFt = null;
+    if (!(typeof b.lFt === "number" && isFinite(b.lFt) && b.lFt > 0)) {
+      b.lFt = (typeof _defLFt === "number" && isFinite(_defLFt) && _defLFt > 0) ? _defLFt : null;
     }
     // Plan metadata (null allowed)
     if (!(b.planId === null || (typeof b.planId === "string" && b.planId))) b.planId = null;
@@ -1324,6 +1336,27 @@ function loadPropertyLayout() {
     try {
       propertyState.beds?.forEach(b => { if (b && !b.offsetFt) b.offsetFt = ensureOffsetFt(b, propertyState.scale); });
       propertyState.obstacles?.forEach(o => { if (o && !o.offsetFt) o.offsetFt = ensureOffsetFt(o, propertyState.scale); });
+    } catch (e) {}
+
+
+
+    // Rebuild canonical arrays from bed objects (prevents "snap to birth" on next drag)
+    try {
+      const n = Array.isArray(propertyState.beds) ? propertyState.beds.length : 0;
+      if (n > 0) {
+        const scaleNow = (typeof data.scale === "number" && isFinite(data.scale) && data.scale > 0) ? data.scale : (propertyState.scale || 2);
+        bedOffsets = ensureBedOffsets(n, propertyState.beds.map((b) => {
+          if (b && b.offset && typeof b.offset.x === "number" && typeof b.offset.y === "number") return b.offset;
+          // fall back to offsetFt -> cells
+          return getDisplayCellPos((b || {}), scaleNow);
+        }));
+        bedRot = ensureBedRot(n, propertyState.beds.map((b) => (typeof b?.rot === "number" ? b.rot : 0)));
+        for (let i = 0; i < n; i++) {
+          if (!propertyState.beds[i]) propertyState.beds[i] = {};
+          propertyState.beds[i].offset = bedOffsets[i];
+          propertyState.beds[i].rot = bedRot[i] ? 1 : 0;
+        }
+      }
     } catch (e) {}
 
 return true;
@@ -1973,8 +2006,8 @@ spr.style.backgroundImage = svgUrl(svg);
         const colsMax = cols, rowsMax = rows;
         if (!propertyState) return;
 
-        // Clamp bed offsets
-        if (Array.isArray(propertyState.bedOffsets)) {
+        // Clamp bed offsets (optional)
+        if (!PG_ALLOW_BEDS_OUT_OF_BOUNDS && Array.isArray(propertyState.bedOffsets)) {
           const bedWU = Math.max(1, Math.ceil(bedW / scale));
           const bedLU = Math.max(1, Math.ceil(bedL / scale));
           for (let i = 0; i < propertyState.bedOffsets.length; i++) {
@@ -2099,6 +2132,7 @@ spr.style.backgroundImage = svgUrl(svg);
             if (e.pointerId !== ev.pointerId) return;
             window.removeEventListener("pointermove", onMove);
             window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
             try { ob.releasePointerCapture(ev.pointerId); } catch (e2) {}
             ensureWithinBounds();
             // Save in absolute feet (preserves position across dimension/scale changes)
@@ -2112,6 +2146,7 @@ spr.style.backgroundImage = svgUrl(svg);
 
           window.addEventListener("pointermove", onMove, { passive: false });
           window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
         });
 canvas.appendChild(ob);
   });
@@ -2181,10 +2216,13 @@ if (!canvas._pgSelectionBound) {
     let dy = displayPos.y;
 
     // Soft visual clamp only — never changes stored position
-    const bedMaxX = Math.max(0, cols - wU);
-    const bedMaxY = Math.max(0, rows - lU);
-    dx = Math.min(bedMaxX, Math.max(0, dx));
-    dy = Math.min(bedMaxY, Math.max(0, dy));
+    // NOTE: When PG_ALLOW_BEDS_OUT_OF_BOUNDS is true, do NOT clamp; allow beds to extend beyond bounds.
+    if (!PG_ALLOW_BEDS_OUT_OF_BOUNDS) {
+      const bedMaxX = Math.max(0, cols - wU);
+      const bedMaxY = Math.max(0, rows - lU);
+      dx = Math.min(bedMaxX, Math.max(0, dx));
+      dy = Math.min(bedMaxY, Math.max(0, dy));
+    }
 
     bedBlock.style.position = "absolute";
     bedBlock.style.left = (dx * cellSize) + "px";
@@ -2211,11 +2249,25 @@ if (!canvas._pgSelectionBound) {
         if (typeof renderSelectedBedGrid === "function") renderSelectedBedGrid(backTo);
       } catch (e) {}
     });
-    // Click selects (without interfering with drag)
-    bedBlock.addEventListener("pointerdown", () => {
-      setSelectedBed(b);
+    // Tap selects (prevents "select on drag" glitches on mobile)
+    bedBlock.addEventListener("pointerdown", (ev) => {
+      try {
+        bedBlock._pgTap = { id: ev.pointerId, x: ev.clientX, y: ev.clientY, moved: false };
+      } catch(e) {}
     });
-    bedBlock.ondblclick = (e) => {
+    bedBlock.addEventListener("pointermove", (ev) => {
+      const t = bedBlock._pgTap;
+      if (!t || ev.pointerId !== t.id) return;
+      const dx = Math.abs(ev.clientX - t.x);
+      const dy = Math.abs(ev.clientY - t.y);
+      if (dx + dy > 10) t.moved = true;
+    });
+    bedBlock.addEventListener("pointerup", (ev) => {
+      const t = bedBlock._pgTap;
+      if (!t || ev.pointerId !== t.id) return;
+      bedBlock._pgTap = null;
+      if (!t.moved) setSelectedBed(b);
+    });bedBlock.ondblclick = (e) => {
       e.preventDefault();
       bedRot[b] = bedRot[b] ? 0 : 1;
 
@@ -2223,15 +2275,19 @@ if (!canvas._pgSelectionBound) {
       ensurePropertyStateInPlace(bedCount, propertyState);
       if (propertyState?.beds?.[b]) propertyState.beds[b].rot = bedRot[b] ? 1 : 0;
 
-      // clamp after rotation so it stays in bounds
-      const { wU, lU } = bedUnitsFor(b);
-      const maxX = Math.max(0, cols - wU);
-      const maxY = Math.max(0, rows - lU);
+      // clamp after rotation so it stays in bounds (optional)
       const cur = bedOffsets[b] || { x: 0, y: 0 };
-      bedOffsets[b] = {
-        x: Math.min(maxX, Math.max(0, cur.x)),
-        y: Math.min(maxY, Math.max(0, cur.y))
-      };
+      if (!PG_ALLOW_BEDS_OUT_OF_BOUNDS) {
+        const { wU, lU } = bedUnitsFor(b);
+        const maxX = Math.max(0, cols - wU);
+        const maxY = Math.max(0, rows - lU);
+        bedOffsets[b] = {
+          x: Math.min(maxX, Math.max(0, cur.x)),
+          y: Math.min(maxY, Math.max(0, cur.y))
+        };
+      } else {
+        bedOffsets[b] = { x: cur.x, y: cur.y };
+      }
 
       // keep offsets in canonical bed object
       ensurePropertyStateInPlace(bedCount, propertyState);
@@ -2276,9 +2332,11 @@ if (!canvas._pgSelectionBound) {
         nx = snapTo(nx, snapUnits);
         ny = snapTo(ny, snapUnits);
 
-        // clamp
-        nx = Math.min(maxX, Math.max(0, nx));
-        ny = Math.min(maxY, Math.max(0, ny));
+        // clamp (optional)
+        if (!PG_ALLOW_BEDS_OUT_OF_BOUNDS) {
+          nx = Math.min(maxX, Math.max(0, nx));
+          ny = Math.min(maxY, Math.max(0, ny));
+        }
 
         if (nx === lastX && ny === lastY) return;
 
@@ -2298,6 +2356,7 @@ if (!canvas._pgSelectionBound) {
 
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
         bedBlock.style.cursor = "grab";
         try { bedBlock.releasePointerCapture(ev.pointerId); } catch (e2) {}
 
@@ -2323,6 +2382,7 @@ if (!canvas._pgSelectionBound) {
 
       window.addEventListener("pointermove", onMove, { passive: false });
       window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
     });
 
     // --- resize handle (only show on selected bed) ---
@@ -2359,13 +2419,17 @@ if (!canvas._pgSelectionBound) {
           propertyState.beds[b].type = lockedType;
           propertyState.beds[b].wFt = nextWFt;
           propertyState.beds[b].lFt = nextLFt;
-          // Recompute footprint and clamp within bounds
+          // Recompute footprint and clamp within bounds (optional)
           const { wU, lU } = bedUnitsFor(b);
-          const maxX = Math.max(0, cols - wU);
-          const maxY = Math.max(0, rows - lU);
           const cur = bedOffsets[b] || { x: 0, y: 0 };
-          const nx = Math.min(maxX, Math.max(0, cur.x));
-          const ny = Math.min(maxY, Math.max(0, cur.y));
+          let nx = cur.x;
+          let ny = cur.y;
+          if (!PG_ALLOW_BEDS_OUT_OF_BOUNDS) {
+            const maxX = Math.max(0, cols - wU);
+            const maxY = Math.max(0, rows - lU);
+            nx = Math.min(maxX, Math.max(0, cur.x));
+            ny = Math.min(maxY, Math.max(0, cur.y));
+          }
           // Collision block: if the resized bed would collide, revert and do nothing
           if (typeof wouldCollide === "function" && wouldCollide(b, nx, ny)) {
             propertyState.beds[b].wFt = startWFt;
@@ -2383,6 +2447,7 @@ if (!canvas._pgSelectionBound) {
         const onUp = () => {
           window.removeEventListener("pointermove", onMove);
           window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
           // Persist
           propertyState.beds[b].type = lockedType;
           propertyState.beds[b].rot = bedRot?.[b] ? 1 : 0;
@@ -2390,6 +2455,7 @@ if (!canvas._pgSelectionBound) {
         };
         window.addEventListener("pointermove", onMove);
         window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
       });
     }
     canvas.appendChild(bedBlock);
@@ -3195,6 +3261,35 @@ let hoveredBedIndex = null; // transient hover target for right-side square pane
 let obstaclePanelCollapsed = false;
 try { obstaclePanelCollapsed = localStorage.getItem("pg_obstacle_panel_collapsed") === "1"; } catch(e) {}
 
+// User-controlled collapses (persisted)
+let propertyToolbarCollapsed = false;
+let selectedSquaresCollapsed = false;
+try { propertyToolbarCollapsed = localStorage.getItem("pg_property_toolbar_collapsed") === "1"; } catch(e) {}
+try { selectedSquaresCollapsed = localStorage.getItem("pg_selected_squares_collapsed") === "1"; } catch(e) {}
+
+// Layout summary toggle handler (installed once)
+let __pgSummaryToggleInstalled = false;
+function ensureSummaryToggleHandlers() {
+  if (__pgSummaryToggleInstalled) return;
+  __pgSummaryToggleInstalled = true;
+  document.addEventListener("click", (e) => {
+    const t = e.target;
+    if (!t || !t.id) return;
+    if (t.id === "togglePropertyToolbarBtn") {
+      propertyToolbarCollapsed = !propertyToolbarCollapsed;
+      try { localStorage.setItem("pg_property_toolbar_collapsed", propertyToolbarCollapsed ? "1" : "0"); } catch(e2) {}
+      try { render(); } catch(e3) {}
+      return;
+    }
+    if (t.id === "toggleSelectedSquaresBtn") {
+      selectedSquaresCollapsed = !selectedSquaresCollapsed;
+      try { localStorage.setItem("pg_selected_squares_collapsed", selectedSquaresCollapsed ? "1" : "0"); } catch(e2) {}
+      try { render(); } catch(e3) {}
+      return;
+    }
+  }, true);
+}
+
 propertyState = null;
 
 function readBedDimsFromInputs() {
@@ -3510,21 +3605,28 @@ function render() {
           <div style="margin-top:12px; padding-top:10px; border-top:1px solid rgba(255,255,255,0.10);">
             <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px;">
               <strong>Property Toolbar</strong>
-              <span style="font-size:12px; opacity:0.75;">Edit selected bed</span>
+              <div style="display:flex; gap:8px; align-items:center;">
+                <button type="button" id="togglePropertyToolbarBtn" class="pg-mini-btn">${propertyToolbarCollapsed ? "Expand" : "Collapse"}</button>
+                <span style="font-size:12px; opacity:0.75;">Edit selected bed</span>
+              </div>
             </div>
-            <div id="layoutBedEditorMount"></div>
+            <div id="layoutBedEditorMount" style="display:${propertyToolbarCollapsed ? "none" : "block"};"></div>
           </div>
         </div>
 
         <div id="layoutSelectedBedHost" style="flex:1 1 360px; background:rgba(0,0,0,0.18); border:1px solid rgba(0,238,255,0.35); border-radius:12px; padding:12px;">
           <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px;">
             <strong>Selected Bed Planting Squares</strong>
-            <span style="font-size:12px; opacity:0.75;">Hover/click a bed</span>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <button type="button" id="toggleSelectedSquaresBtn" class="pg-mini-btn">${selectedSquaresCollapsed ? "Expand" : "Collapse"}</button>
+              <span style="font-size:12px; opacity:0.75;">Hover/click a bed</span>
+            </div>
           </div>
-          <div id="layoutSelectedBedMount"></div>
+          <div id="layoutSelectedBedMount" style="display:${selectedSquaresCollapsed ? "none" : "block"};"></div>
         </div>
       </div>
     `;
+    try { ensureSummaryToggleHandlers(); } catch(e) {}
   }
   // Re-attach the selected-bed panel into the new mount created above.
   try { attachSelectedBedPanelNodeToMount(); } catch (e) {}
